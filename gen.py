@@ -1,5 +1,6 @@
 import argparse
 import textwrap
+import base64
 from openai import OpenAI
 from prompter import Prompter
 
@@ -16,26 +17,30 @@ def improve_prompt(prompt):
     print(f"Improved prompt: {new_prompt}")
     return new_prompt.strip()
 
-def generate_image(prompt):
+def generate_image(prompt, output_path):
     client = OpenAI()
     response = client.images.generate(
-        model="dall-e-3",
+        model="gpt-image-1",
         prompt=prompt,
-        size="1792x1024",
-        quality="hd",
+        size="1536x1024",
+        quality="high",
         n=1,
     )
-    image_url = response.data[0].url
-    return image_url
+    image_base64 = response.data[0].b64_json
+    image_bytes = base64.b64decode(image_base64)
+
+    with open(output_path, "wb") as f:
+        f.write(image_bytes)
+    print(f"Image successfully generated and saved at {output_path}")
 
 def main():
     parser = argparse.ArgumentParser(description="Generate an image from a text prompt using OpenAI's DALL-E model.")
-    parser.add_argument('prompt', type=str, help='The text prompt to generate the image from')
+    parser.add_argument('-p', '--prompt', type=str, required=True, help='The text prompt to generate the image from')
+    parser.add_argument('-o', '--output', type=str, required=True, help='The path to save the generated image')
     args = parser.parse_args()
 
     improved_prompt = improve_prompt(args.prompt)
-    image_url = generate_image(improved_prompt)
-    print(f"Generated image URL: {image_url}")
+    generate_image(improved_prompt, args.output)
 
 if __name__ == "__main__":
     main()

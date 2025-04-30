@@ -1,4 +1,5 @@
 import argparse
+import base64
 import textwrap
 from openai import OpenAI
 from prompter import Prompter
@@ -16,27 +17,38 @@ def improve_prompt(prompt):
     print(f"Improved prompt: {new_prompt}")
     return new_prompt.strip()
 
-def edit_image(image_path, prompt):
+def edit_image(input_images, prompt, output_path):
     client = OpenAI()
-    response = client.images.edit(
-        model="dall-e-2",
-        image=open(image_path, "rb"),
-        prompt=prompt,
-        n=1,
-        size="1024x1024"
+
+    # Open all input images
+    image_files = [open(image_path, "rb") for image_path in input_images]
+
+    # Call the OpenAI API for image editing
+    result = client.images.edit(
+        model="gpt-image-1",
+        image=image_files,
+        prompt=prompt
     )
-    image_url = response.data[0].url
-    return image_url
+
+    # Decode the base64 image data
+    image_base64 = result.data[0].b64_json
+    image_bytes = base64.b64decode(image_base64)
+
+    # Save the image to the specified output path
+    with open(output_path, "wb") as f:
+        f.write(image_bytes)
+
+    print(f"Edited image successfully saved at {output_path}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Edit an image based on a text prompt using OpenAI's DALL-E model.")
-    parser.add_argument('image_path', type=str, help='The path to the image to be edited')
-    parser.add_argument('prompt', type=str, help='The text prompt to edit the image')
+    parser = argparse.ArgumentParser(description="Edit an image based on a text prompt using OpenAI's image editing model.")
+    parser.add_argument('-i', '--input', type=str, nargs='+', required=True, help='Paths to the input images (multiple allowed)')
+    parser.add_argument('-p', '--prompt', type=str, required=True, help='The text prompt to edit the image')
+    parser.add_argument('-o', '--output', type=str, required=True, help='The path to save the edited image')
     args = parser.parse_args()
 
     improved_prompt = improve_prompt(args.prompt)
-    image_url = edit_image(args.image_path, improved_prompt)
-    print(f"Edited image URL: {image_url}")
+    edit_image(args.input, improved_prompt, args.output)
 
 if __name__ == "__main__":
     main()
