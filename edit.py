@@ -5,13 +5,12 @@ from openai import OpenAI
 from prompter import Prompter
 
 def improve_prompt(prompt):
-    instruction = "Turn the following prompt into an image editing prompt:\n"
+    instruction = "Turn the following prompt into a high-quality image editing prompt:\n"
     full_prompt = instruction + prompt
     p = Prompter(textwrap.dedent('''
-        You are a creative assistant. Your task is to take the user's prompt and turn it into an image editing prompt to be sent to another AI.
-        Do not just evolve the text or phrasing of the original prompt, but also follow requests inside the original prompt.
-        For instance, if a user wants to edit an image to represent a quote, first create a creative metaphor description of the image and then send this image description to the image AI.
-        The final output should be a clean prompt ready to be sent to the image AI.
+        You are a professional assistant. Your task is to take the user's prompt and turn it into a high-quality image editing prompt to be sent to another AI.
+        Focus on enhancing the clarity, precision, and technical details of the prompt to ensure the best possible image quality.
+        Avoid adding unnecessary creative elements or metaphorical descriptions. The final output should be a clean and precise prompt ready to be sent to the image AI.
     '''), model='flow-openai-gpt-4o', transient=True)
     new_prompt = p.user(full_prompt)
     print(f"Improved prompt: {new_prompt}")
@@ -27,6 +26,8 @@ def edit_image(input_images, prompt, output_path):
     result = client.images.edit(
         model="gpt-image-1",
         image=image_files,
+        size="1536x1024",
+        quality="high",        
         prompt=prompt
     )
 
@@ -47,6 +48,7 @@ def main():
     parser.add_argument('-o', '--output', type=str, required=True, help='The path to save the edited image')
     args = parser.parse_args()
 
+    # improved_prompt = args.prompt
     improved_prompt = improve_prompt(args.prompt)
     edit_image(args.input, improved_prompt, args.output)
 
