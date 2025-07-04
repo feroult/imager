@@ -2,7 +2,7 @@ import argparse
 import textwrap
 import base64
 from openai import OpenAI
-from prompter import Prompter
+from coder.core import Prompter
 
 def improve_prompt(prompt):
     instruction = "Turn the following prompt into a high-quality image generation prompt:\n"
