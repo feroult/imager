@@ -26,8 +26,10 @@ def edit_image(input_images, prompt, output_path):
     result = client.images.edit(
         model="gpt-image-1",
         image=image_files,
-        size="1536x1024",
-        quality="high",        
+        # size="1536x1024",
+        size="1024x1024",
+        # quality="high",        
+        quality="medium",
         prompt=prompt
     )
 
@@ -48,8 +50,8 @@ def main():
     parser.add_argument('-o', '--output', type=str, required=True, help='The path to save the edited image')
     args = parser.parse_args()
 
-    # improved_prompt = args.prompt
-    improved_prompt = improve_prompt(args.prompt)
+    improved_prompt = args.prompt
+    # improved_prompt = improve_prompt(args.prompt)
     edit_image(args.input, improved_prompt, args.output)
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ package-mode = false
 dependencies = [
     "openai (>=1.93.0,<2.0.0)",
     "pillow (>=11.3.0,<12.0.0)",
+    "boto3 (>=1.35.0,<2.0.0)",
     "flow-coder @ https://storage.googleapis.com/flow-coder/flow_coder-1.4.0-py3-none-any.whl"
 ]
 
