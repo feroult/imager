@@ -309,6 +309,42 @@ def evaluate_and_analyze_image(image_info):
         }
 
 
+def enhance_prompt_from_analysis(original_prompt, best_analysis, iteration):
+    """Use Nova Pro analysis to improve the generation prompt"""
+    enhancement_prompt = f"""Original prompt: "{original_prompt}"
+Best result analysis from iteration {iteration-1}: "{best_analysis}"
+
+Based on the analysis feedback, create an improved Nova Canvas prompt that addresses the identified issues.
+Keep the original creative intent but add specific details to fix missing/incorrect elements.
+Focus on:
+- Addressing missing elements mentioned in analysis
+- Correcting incorrect elements 
+- Improving areas that need enhancement
+- Maintaining coherent, descriptive language for Nova Canvas
+
+Return only the enhanced prompt, under 1024 characters."""
+    
+    p = Prompter(textwrap.dedent('''
+        You are optimizing prompts for AWS Nova Canvas based on evaluation feedback.
+        Your task is to take the original prompt and analysis feedback to create an improved prompt.
+        
+        Guidelines:
+        - Keep the original creative vision intact
+        - Address specific issues mentioned in the analysis
+        - Use descriptive, caption-like language that Nova Canvas works best with
+        - Avoid negation words like "no" or "without"
+        - Keep it under 1024 characters
+        - Make it a coherent, well-structured prompt
+        
+        Return only the enhanced prompt, nothing else.
+    '''), model='flow-openai-gpt-4o', transient=True)
+    
+    enhanced = p.user(enhancement_prompt)
+    enhanced_prompt = enhanced.strip()[:1024]
+    print(f"Enhanced prompt for iteration {iteration}: {enhanced_prompt}")
+    return enhanced_prompt
+
+
 def create_session_structure(output_folder, original_prompt, args):
     """Create initial session structure and config"""
     output_path = Path(output_folder)
@@ -320,6 +356,7 @@ def create_session_structure(output_folder, original_prompt, args):
         "session_id": session_id,
         "original_prompt": original_prompt,
         "polished_prompt": None,
+        "current_prompt": original_prompt,  # Track evolving prompt
         "parameters": {
             "threshold": args.threshold,
             "max_iterations": args.max_iter,
@@ -331,6 +368,7 @@ def create_session_structure(output_folder, original_prompt, args):
             "current_iteration": 0,
             "best_score": 0.0,
             "best_image": None,
+            "best_analysis": None,  # Track best analysis for prompt enhancement
             "threshold_reached": False,
             "start_time": datetime.now().isoformat()
         },
@@ -374,8 +412,9 @@ def run_iteration(output_folder, config, iteration_num, strategy="TEXT_IMAGE", b
     
     print(f"\n--- Iteration {iteration_num} ({strategy}) ---")
     
-    # Generate images
-    prompt = config.get("polished_prompt") or config["original_prompt"]
+    # Use the current evolved prompt
+    prompt = config.get("current_prompt", config["original_prompt"])
+    print(f"Using prompt: {prompt}")
     
     if strategy == "TEXT_IMAGE":
         print("Generating 4 new images...")
@@ -480,15 +519,26 @@ def run_iteration(output_folder, config, iteration_num, strategy="TEXT_IMAGE", b
     with open(best_analysis_source, 'r') as src, open(best_analysis_path, 'w') as dst:
         dst.write(src.read())
     
+    # Get best analysis for this iteration
+    best_analysis = None
+    if best_candidate:
+        best_candidate_num = candidates[[c["filename"] for c in candidates].index(best_candidate)]["analysis_file"].split("_")[1].split(".")[0]
+        best_analysis_path = iter_path / f"analysis_{best_candidate_num}.txt"
+        if best_analysis_path.exists():
+            with open(best_analysis_path, 'r') as f:
+                best_analysis = f.read()
+    
     # Save iteration metadata
     iteration_info = {
         "iteration": iteration_num,
         "strategy": strategy,
         "timestamp": datetime.now().isoformat(),
+        "prompt_used": prompt,
         "base_image": str(base_image) if base_image else None,
         "candidates": candidates,
         "best_candidate": best_candidate,
-        "best_score": best_score
+        "best_score": best_score,
+        "best_analysis": best_analysis
     }
     
     with open(iter_path / "generation_info.json", 'w') as f:
@@ -577,6 +627,7 @@ def main():
     if args.polish_prompt and not config.get("polished_prompt"):
         polished = light_polish_prompt(config["original_prompt"])
         config["polished_prompt"] = polished
+        config["current_prompt"] = polished  # Update current_prompt to use polished version
         
         # Save polished prompt
         with open(Path(args.output) / "polished_prompt.txt", 'w') as f:
@@ -585,6 +636,7 @@ def main():
     print(f"Original prompt: {config['original_prompt']}")
     if config.get("polished_prompt"):
         print(f"Polished prompt: {config['polished_prompt']}")
+    print(f"Current active prompt: {config.get('current_prompt', config['original_prompt'])}")
     print(f"Threshold: {config['parameters']['threshold']}")
     print(f"Max iterations: {config['parameters']['max_iterations']}")
     
@@ -617,6 +669,28 @@ def main():
                 current_best_image = str(best_image_path.relative_to(Path(args.output)))
                 config['current_state']['best_score'] = current_best_score
                 config['current_state']['best_image'] = current_best_image
+                config['current_state']['best_analysis'] = iteration_info.get('best_analysis')
+            
+            # Enhance prompt for next iteration based on current best analysis
+            if iteration < config['parameters']['max_iterations'] and best_score < config['parameters']['threshold']:
+                try:
+                    current_best_analysis = config['current_state']['best_analysis']
+                    if current_best_analysis:
+                        enhanced_prompt = enhance_prompt_from_analysis(
+                            config['original_prompt'], 
+                            current_best_analysis, 
+                            iteration + 1
+                        )
+                        config['current_prompt'] = enhanced_prompt
+                        
+                        # Save enhanced prompt to file
+                        enhanced_prompt_path = Path(args.output) / f"enhanced_prompt_iter_{iteration + 1:03d}.txt"
+                        with open(enhanced_prompt_path, 'w') as f:
+                            f.write(f"Iteration {iteration + 1} Enhanced Prompt:\n{enhanced_prompt}\n\nBased on analysis:\n{current_best_analysis}")
+                            
+                except Exception as e:
+                    print(f"Warning: Could not enhance prompt for next iteration: {e}")
+                    # Continue with current prompt if enhancement fails
             
             # Check threshold
             if best_score >= config['parameters']['threshold']:
