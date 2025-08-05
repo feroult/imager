@@ -5,6 +5,7 @@ import base64
 import textwrap
 from datetime import datetime
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import boto3
 from PIL import Image
 from botocore.config import Config
@@ -279,6 +280,35 @@ Be concise and actionable for image generation improvement."""
         return "Analysis failed"
 
 
+def evaluate_and_analyze_image(image_info):
+    """Evaluate and analyze a single image - designed for parallel execution"""
+    image_path, original_prompt, candidate_index, prefix = image_info
+    
+    print(f"Evaluating {prefix}_{candidate_index:02d}...")
+    
+    try:
+        # Evaluate image
+        score = evaluate_image(image_path, original_prompt)
+        
+        # Get analysis for this image
+        analysis = analyze_image(image_path, original_prompt)
+        
+        return {
+            'candidate_index': candidate_index,
+            'score': score,
+            'analysis': analysis,
+            'success': True
+        }
+    except Exception as e:
+        print(f"Error evaluating {prefix}_{candidate_index:02d}: {e}")
+        return {
+            'candidate_index': candidate_index,
+            'score': 0.0,
+            'analysis': f"Evaluation failed: {e}",
+            'success': False
+        }
+
+
 def create_session_structure(output_folder, original_prompt, args):
     """Create initial session structure and config"""
     output_path = Path(output_folder)
@@ -336,7 +366,7 @@ def save_session_config(output_folder, config):
         json.dump(config, f, indent=2)
 
 
-def run_iteration(output_folder, config, iteration_num, strategy="TEXT_IMAGE", base_image=None):
+def run_iteration(output_folder, config, iteration_num, strategy="TEXT_IMAGE", base_image=None, workers=4):
     """Run a single iteration of generation and evaluation"""
     output_path = Path(output_folder)
     iter_path = output_path / f"iteration_{iteration_num:03d}"
@@ -358,46 +388,84 @@ def run_iteration(output_folder, config, iteration_num, strategy="TEXT_IMAGE", b
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
     
-    # Save and evaluate images
+    # Save images temporarily for parallel evaluation
+    temp_paths = []
+    for i, image_bytes in enumerate(images, 1):
+        temp_path = iter_path / f"{prefix}_{i:02d}_temp.png"
+        with open(temp_path, "wb") as f:
+            f.write(image_bytes)
+        temp_paths.append((temp_path, config["original_prompt"], i, prefix))
+    
+    # Parallel evaluation and analysis
+    print("Evaluating images in parallel...")
     candidates = []
     best_score = 0.0
     best_candidate = None
     best_image_path = None
     
-    for i, image_bytes in enumerate(images, 1):
-        # Save image temporarily for evaluation
-        temp_path = iter_path / f"{prefix}_{i:02d}_temp.png"
-        with open(temp_path, "wb") as f:
-            f.write(image_bytes)
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        # Submit all evaluation tasks
+        future_to_info = {
+            executor.submit(evaluate_and_analyze_image, image_info): image_info 
+            for image_info in temp_paths
+        }
         
-        # Evaluate image
-        print(f"Evaluating {prefix}_{i:02d}...")
-        score = evaluate_image(temp_path, config["original_prompt"])
-        
-        # Rename with score
-        final_name = f"{prefix}_{i:02d}_score_{score:.2f}.png"
-        final_path = iter_path / final_name
-        temp_path.rename(final_path)
-        
-        # Get analysis for this image
-        analysis = analyze_image(final_path, config["original_prompt"])
-        analysis_path = iter_path / f"analysis_{i:02d}.txt"
-        with open(analysis_path, 'w') as f:
-            f.write(f"Score: {score:.2f}\n\n{analysis}")
-        
-        candidates.append({
-            "filename": final_name,
-            "type": strategy,
-            "score": score,
-            "analysis_file": f"analysis_{i:02d}.txt"
-        })
-        
-        if score > best_score:
-            best_score = score
-            best_candidate = final_name
-            best_image_path = final_path
-        
-        print(f"  {final_name} - Score: {score:.2f}")
+        # Process completed evaluations
+        for future in as_completed(future_to_info):
+            image_info = future_to_info[future]
+            temp_path, original_prompt, candidate_index, prefix = image_info
+            
+            try:
+                result = future.result()
+                score = result['score']
+                analysis = result['analysis']
+                success = result['success']
+                
+                # Rename with score
+                final_name = f"{prefix}_{candidate_index:02d}_score_{score:.2f}.png"
+                final_path = iter_path / final_name
+                temp_path.rename(final_path)
+                
+                # Save analysis
+                analysis_path = iter_path / f"analysis_{candidate_index:02d}.txt"
+                with open(analysis_path, 'w') as f:
+                    f.write(f"Score: {score:.2f}\n\n{analysis}")
+                
+                candidates.append({
+                    "filename": final_name,
+                    "type": strategy,
+                    "score": score,
+                    "analysis_file": f"analysis_{candidate_index:02d}.txt"
+                })
+                
+                if score > best_score:
+                    best_score = score
+                    best_candidate = final_name
+                    best_image_path = final_path
+                
+                print(f"  {final_name} - Score: {score:.2f}")
+                
+            except Exception as e:
+                print(f"Error processing {prefix}_{candidate_index:02d}: {e}")
+                # Handle failed evaluation by keeping temp file and giving it 0 score
+                final_name = f"{prefix}_{candidate_index:02d}_score_0.00.png"
+                final_path = iter_path / final_name
+                temp_path.rename(final_path)
+                
+                candidates.append({
+                    "filename": final_name,
+                    "type": strategy,
+                    "score": 0.0,
+                    "analysis_file": f"analysis_{candidate_index:02d}.txt"
+                })
+                
+                # Save error analysis
+                analysis_path = iter_path / f"analysis_{candidate_index:02d}.txt"
+                with open(analysis_path, 'w') as f:
+                    f.write(f"Score: 0.00\n\nEvaluation failed: {e}")
+    
+    # Sort candidates by index to maintain consistent ordering
+    candidates.sort(key=lambda x: int(x["filename"].split("_")[1]))
     
     # Create symlink to best image
     best_link = iter_path / "best_image.png"
@@ -438,6 +506,7 @@ def main():
     parser.add_argument('-t', '--threshold', type=float, default=0.8, help='Quality threshold to stop iteration (0.0-1.0)')
     parser.add_argument('--max-iter', type=int, default=5, help='Maximum number of iterations')
     parser.add_argument('--polish-prompt', action='store_true', help='Apply light prompt polishing')
+    parser.add_argument('--workers', type=int, default=4, help='Number of parallel workers for evaluation (default: 4)')
     
     # Session management
     parser.add_argument('--continue', dest='continue_session', type=str, help='Continue existing session from folder')
@@ -537,7 +606,7 @@ def main():
         # Run iteration
         try:
             best_score, best_image_path, iteration_info = run_iteration(
-                args.output, config, iteration, strategy, base_image
+                args.output, config, iteration, strategy, base_image, args.workers
             )
             
             # Update config
