@@ -82,7 +82,7 @@ def generate_images_nova_canvas(prompt, num_images=4):
         raise
 
 
-def generate_image_variation(base_image_path, num_images=4):
+def generate_image_variation(base_image_path, variation_prompt, num_images=4):
     """Generate variations of an existing image using Nova Canvas"""
     bedrock = boto3.client(
         service_name='bedrock-runtime',
@@ -100,7 +100,7 @@ def generate_image_variation(base_image_path, num_images=4):
         "taskType": "IMAGE_VARIATION", 
         "imageVariationParams": {
             "images": [base64_image],
-            "text": ""  # Optional text for variation guidance
+            "text": variation_prompt  # Use the enhanced prompt for variation guidance
         },
         "imageGenerationConfig": {
             "numberOfImages": num_images,
@@ -422,7 +422,7 @@ def run_iteration(output_folder, config, iteration_num, strategy="TEXT_IMAGE", b
         prefix = "candidate"
     elif strategy == "IMAGE_VARIATION":
         print(f"Generating 4 variations of {base_image}...")
-        images = generate_image_variation(base_image, 4)
+        images = generate_image_variation(base_image, prompt, 4)
         prefix = "variation"
     else:
         raise ValueError(f"Unknown strategy: {strategy}")
