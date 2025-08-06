@@ -52,6 +52,7 @@ Please analyze the image and provide complete text styling that will make the te
 4. Background colors and contrast for determining text color
 5. Image style (modern, vintage, professional, casual) for font selection
 6. Natural flow and alignment with image elements
+7. **Text inclination/rotation**: Evaluate whether the image has diagonal elements, dynamic composition, or creative context that would benefit from angled text. Use 0° for clean/professional/horizontal layouts, but consider angles when the image has diagonal lines, architectural elements, or needs dynamic visual interest.
 
 Return ONLY a JSON object with these exact fields:
 {{
@@ -62,9 +63,10 @@ Return ONLY a JSON object with these exact fields:
     "color": "<text color as hex #RRGGBB or color name like white, black, red, blue, yellow>",
     "stroke_color": "<outline color for contrast, use 'none' if no stroke needed>",
     "stroke_width_percent": <stroke width as percentage of font size (typically 5-15 if needed)>,
-    "angle": <rotation angle in degrees, 0 for horizontal>,
+    "angle": <rotation angle in degrees - consider creative angles, not just 0>,
     "opacity": <text opacity 0-100, where 100 is fully opaque>,
     "reasoning": "<brief explanation of placement and styling choices>",
+    "angle_reasoning": "<specific explanation for the angle choice - why 0° or why angled>",
     "alternative": {{
         "x_percent": <alternative x percentage>,
         "y_percent": <alternative y percentage>,
@@ -73,8 +75,9 @@ Return ONLY a JSON object with these exact fields:
         "color": "<alternative text color>",
         "stroke_color": "<alternative stroke color>",
         "stroke_width_percent": <alternative stroke width percentage>,
-        "angle": <alternative angle>,
-        "opacity": <alternative opacity>
+        "angle": <alternative angle - try different from primary>,
+        "opacity": <alternative opacity>,
+        "angle_reasoning": "<explanation for alternative angle choice>"
     }}
 }}
 
@@ -86,7 +89,13 @@ Guidelines:
 - stroke_width_percent: 5-15% of font size if stroke needed
 - Font: Choose based on image style and mood
 - Color: High contrast with background (e.g., white on dark, black on light)
-- Angle: Usually 0, but can be -30 to 30 degrees for dynamic layouts
+- Angle: Text rotation in degrees. **Choose based on image content:**
+  * **0° = horizontal** (DEFAULT for landscapes, portraits, clean/professional images, formal content)
+  * **-15 to -5°** = slight counter-clockwise (when image has subtle diagonal elements)
+  * **5 to 15°** = slight clockwise (for dynamic energy, following upward slopes)
+  * **-30 to -20° or 20 to 30°** = strong angles (only for dramatic compositions, strong diagonal elements)
+  * **Key rule**: Use 0° unless the image specifically has diagonal lines, tilted elements, or creative/artistic context
+  * Match angles to existing image geometry, don't add angles to static/horizontal compositions
 - Opacity: Usually 100, but can be 70-90 for subtle watermarks"""
 
     # Add custom prompt if provided
@@ -248,13 +257,15 @@ def apply_text_to_image(image_path, text, placement_data, output_path):
     if opacity < 100:
         cmd.extend(['-fill-opacity', f'{opacity}%'])
     
-    # Add annotation with position and angle
+    # Handle text rotation properly
     if angle != 0:
-        cmd.extend(['-annotate', f'+{x}+{y}+{angle}'])
+        # Use draw command for better angle control
+        draw_cmd = f"translate {x},{y} rotate {angle} text 0,0 '{text}'"
+        cmd.extend(['-draw', draw_cmd])
     else:
-        cmd.extend(['-annotate', f'+{x}+{y}'])
+        # Standard annotation for non-rotated text
+        cmd.extend(['-annotate', f'+{x}+{y}', text])
     
-    cmd.append(text)
     cmd.append(output_path)
     
     try:
@@ -306,6 +317,8 @@ def main():
         print(f"  Opacity: {placement_data.get('opacity', 100)}%")
         if 'reasoning' in placement_data:
             print(f"  Reasoning: {placement_data['reasoning']}")
+        if 'angle_reasoning' in placement_data:
+            print(f"  Angle reasoning: {placement_data['angle_reasoning']}")
         
         if 'alternative' in placement_data:
             alt = placement_data['alternative']
@@ -318,6 +331,8 @@ def main():
             print(f"  Stroke: {alt.get('stroke_color', 'none')} ({alt['stroke_width_percent']:.1f}% = {alt.get('stroke_width', 0)}px)")
             print(f"  Angle: {alt.get('angle', 0)}°")
             print(f"  Opacity: {alt.get('opacity', 100)}%")
+            if 'angle_reasoning' in alt:
+                print(f"  Angle reasoning: {alt['angle_reasoning']}")
         
         # Use alternative placement if requested
         if args.use_alternative and 'alternative' in placement_data:
