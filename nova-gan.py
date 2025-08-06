@@ -309,6 +309,143 @@ def evaluate_and_analyze_image(image_info):
         }
 
 
+def analyze_prompt_for_clarification(user_prompt):
+    """Analyze user prompt and identify areas needing clarification"""
+    analysis_prompt = f"""Analyze this image generation prompt: "{user_prompt}"
+
+Identify missing details that would significantly improve image generation quality:
+1. **Subject details**: Missing physical characteristics, poses, expressions
+2. **Environment**: Missing setting, background, atmosphere details  
+3. **Visual style**: Missing art style, lighting, perspective, color palette
+4. **Composition**: Missing framing, focal point, mood
+
+For each missing category, generate 1-2 specific questions to ask the user.
+Only ask about truly important missing details that would make a significant difference.
+Maximum 4 questions total.
+
+Return as valid JSON:
+{{
+  "needs_clarification": true/false,
+  "questions": [
+    {{"category": "subject", "question": "What pose should the dragon be in?"}},
+    {{"category": "environment", "question": "What time of day should this scene be?"}}
+  ]
+}}"""
+    
+    p = Prompter(textwrap.dedent('''
+        You are an expert at analyzing image prompts for missing details.
+        Your task is to identify the most important missing information that would 
+        significantly improve image generation quality.
+        
+        Focus on:
+        - Key visual details that are ambiguous or missing
+        - Important stylistic choices not specified  
+        - Critical environmental context
+        - Essential compositional elements
+        
+        Only suggest clarifications that would make a meaningful difference.
+        Return valid JSON format only.
+    '''), model='flow-openai-gpt-4o', transient=True)
+    
+    try:
+        response = p.user(analysis_prompt)
+        # Clean response to extract JSON
+        response = response.strip()
+        if '```json' in response:
+            response = response.split('```json')[1].split('```')[0].strip()
+        elif '```' in response:
+            response = response.split('```')[1].strip()
+            
+        return json.loads(response)
+    except (json.JSONDecodeError, Exception) as e:
+        print(f"Warning: Could not parse clarification analysis: {e}")
+        return {"needs_clarification": False, "questions": []}
+
+
+def generate_refined_prompt(original_prompt, clarifications):
+    """Synthesize original prompt with user clarifications"""
+    clarification_text = "\n".join([f"- {cat}: {ans}" for cat, ans in clarifications.items()])
+    
+    refinement_prompt = f"""Original prompt: "{original_prompt}"
+
+User provided these clarifications:
+{clarification_text}
+
+Create a refined, coherent prompt that incorporates the clarifications naturally.
+Keep the original creative intent but enhance with the provided details.
+Make it optimal for Nova Canvas:
+- Descriptive, caption-like language
+- Clear visual details
+- Under 1024 characters
+- Avoid negation words like "no" or "without"
+
+Return only the refined prompt, nothing else."""
+    
+    p = Prompter(textwrap.dedent('''
+        You synthesize image prompts with user clarifications.
+        Your task is to create a cohesive, detailed prompt that naturally incorporates
+        user feedback while maintaining the original creative vision.
+        
+        Make the prompt:
+        - Descriptive and specific
+        - Optimized for AI image generation
+        - Natural and readable
+        - Under 1024 characters
+        
+        Return only the refined prompt.
+    '''), model='flow-openai-gpt-4o', transient=True)
+    
+    refined = p.user(refinement_prompt)
+    refined_prompt = refined.strip()[:1024]
+    print(f"\n✨ Refined prompt: {refined_prompt}")
+    return refined_prompt
+
+
+def interactive_prompt_refinement(user_prompt):
+    """Interactively refine the user's prompt through Q&A"""
+    print(f"\n🔍 Analyzing your prompt for areas that could be clarified...")
+    
+    analysis = analyze_prompt_for_clarification(user_prompt)
+    
+    if not analysis.get("needs_clarification", False) or not analysis.get("questions"):
+        print("✅ Your prompt looks complete and detailed!")
+        return user_prompt, {}
+    
+    print(f"\n💡 I found some areas where more detail could improve your image:")
+    print(f"Original prompt: \"{user_prompt}\"\n")
+    
+    answers = {}
+    for i, q_data in enumerate(analysis["questions"], 1):
+        category = q_data["category"]
+        question = q_data["question"]
+        
+        print(f"{i}. {question}")
+        try:
+            answer = input("   Your answer (or 'skip' to skip): ").strip()
+            
+            if answer.lower() not in ['skip', ''] and answer:
+                answers[category] = answer
+                print(f"   ✓ Got it: {answer}")
+            else:
+                print(f"   ○ Skipped")
+                
+        except KeyboardInterrupt:
+            print(f"\n\n⚠️  Refinement cancelled. Using original prompt.")
+            return user_prompt, {}
+        except EOFError:
+            print(f"\n⚠️  Input ended. Using original prompt.")
+            return user_prompt, {}
+    
+    if not answers:
+        print(f"\n📝 No clarifications provided. Using original prompt.")
+        return user_prompt, {}
+    
+    print(f"\n🔄 Generating refined prompt...")
+    refined_prompt = generate_refined_prompt(user_prompt, answers)
+    
+    return refined_prompt, answers
+
+
 def enhance_prompt_from_analysis(original_prompt, best_analysis, iteration):
     """Use Nova Pro analysis to improve the generation prompt"""
     enhancement_prompt = f"""Original prompt: "{original_prompt}"
@@ -356,11 +493,17 @@ def create_session_structure(output_folder, original_prompt, args):
         "session_id": session_id,
         "original_prompt": original_prompt,
         "polished_prompt": None,
+        "refined_prompt": None,  # Track interactive refinement
         "current_prompt": original_prompt,  # Track evolving prompt
+        "interactive_refinement": {
+            "enabled": getattr(args, 'interactive_refine', False),
+            "clarifications": {}
+        },
         "parameters": {
             "threshold": args.threshold,
             "max_iterations": args.max_iter,
             "polish_prompt": args.polish_prompt,
+            "interactive_refine": getattr(args, 'interactive_refine', False),
             "batch_size": 4
         },
         "current_state": {
@@ -556,6 +699,7 @@ def main():
     parser.add_argument('-t', '--threshold', type=float, default=0.8, help='Quality threshold to stop iteration (0.0-1.0)')
     parser.add_argument('--max-iter', type=int, default=5, help='Maximum number of iterations')
     parser.add_argument('--polish-prompt', action='store_true', help='Apply light prompt polishing')
+    parser.add_argument('--interactive-refine', action='store_true', help='Enable interactive prompt refinement through Q&A')
     parser.add_argument('--workers', type=int, default=4, help='Number of parallel workers for evaluation (default: 4)')
     
     # Session management
@@ -577,8 +721,26 @@ def main():
             print(f"Best score: {config['current_state']['best_score']:.3f}")
             print(f"Threshold: {config['parameters']['threshold']}")
             print(f"Threshold reached: {config['current_state']['threshold_reached']}")
+            
+            # Show prompt evolution
+            print(f"\nPrompt Evolution:")
+            print(f"  Original: {config['original_prompt']}")
+            if config.get('refined_prompt'):
+                print(f"  Refined: {config['refined_prompt']}")
+            if config.get('polished_prompt'):
+                print(f"  Polished: {config['polished_prompt']}")
+            print(f"  Current: {config.get('current_prompt', config['original_prompt'])}")
+            
+            # Show interactive refinement info
+            if config.get('interactive_refinement', {}).get('enabled'):
+                clarifications = config.get('interactive_refinement', {}).get('clarifications', {})
+                if clarifications:
+                    print(f"\nInteractive Clarifications ({len(clarifications)}):")
+                    for category, answer in clarifications.items():
+                        print(f"  {category}: {answer}")
+            
             if config['current_state']['best_image']:
-                print(f"Best image: {config['current_state']['best_image']}")
+                print(f"\nBest image: {config['current_state']['best_image']}")
             return
         except FileNotFoundError as e:
             print(f"Error: {e}")
@@ -623,9 +785,36 @@ def main():
         config = create_session_structure(args.output, args.prompt, args)
         start_iteration = 1
     
+    # Apply interactive refinement if requested (only for new sessions)
+    if args.interactive_refine and not config.get("refined_prompt"):
+        try:
+            refined_prompt, clarifications = interactive_prompt_refinement(config["original_prompt"])
+            
+            if refined_prompt != config["original_prompt"]:
+                config["refined_prompt"] = refined_prompt
+                config["current_prompt"] = refined_prompt
+                config["interactive_refinement"]["clarifications"] = clarifications
+                
+                # Save refined prompt and clarifications
+                with open(Path(args.output) / "refined_prompt.txt", 'w') as f:
+                    f.write(refined_prompt)
+                
+                with open(Path(args.output) / "clarification_qa.json", 'w') as f:
+                    json.dump({
+                        "original_prompt": config["original_prompt"],
+                        "clarifications": clarifications,
+                        "refined_prompt": refined_prompt
+                    }, f, indent=2)
+                    
+        except Exception as e:
+            print(f"Warning: Interactive refinement failed: {e}")
+            print("Continuing with original prompt...")
+    
     # Apply prompt polishing if requested
     if args.polish_prompt and not config.get("polished_prompt"):
-        polished = light_polish_prompt(config["original_prompt"])
+        # Polish the current active prompt (original or refined)
+        base_prompt = config.get("current_prompt", config["original_prompt"])
+        polished = light_polish_prompt(base_prompt)
         config["polished_prompt"] = polished
         config["current_prompt"] = polished  # Update current_prompt to use polished version
         
@@ -634,11 +823,18 @@ def main():
             f.write(polished)
     
     print(f"Original prompt: {config['original_prompt']}")
+    if config.get("refined_prompt"):
+        print(f"Refined prompt: {config['refined_prompt']}")
     if config.get("polished_prompt"):
         print(f"Polished prompt: {config['polished_prompt']}")
     print(f"Current active prompt: {config.get('current_prompt', config['original_prompt'])}")
     print(f"Threshold: {config['parameters']['threshold']}")
     print(f"Max iterations: {config['parameters']['max_iterations']}")
+    
+    if config.get("interactive_refinement", {}).get("enabled"):
+        clarifications = config.get("interactive_refinement", {}).get("clarifications", {})
+        if clarifications:
+            print(f"Interactive clarifications: {len(clarifications)} provided")
     
     # Main iteration loop
     current_best_score = config['current_state']['best_score']
