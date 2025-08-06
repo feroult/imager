@@ -80,7 +80,8 @@ Return ONLY a JSON object with these exact fields:
 
 Guidelines:
 - x_percent: 0 = left edge, 50 = center, 100 = right edge
-- y_percent: 0 = top edge, 50 = middle, 100 = bottom edge  
+- y_percent: Position where you want the CENTER of the text vertically (0 = top, 50 = middle, 100 = bottom)
+  Note: The system will automatically adjust for text baseline positioning
 - font_size_percent: Typically 3-8% of image width for readability
 - stroke_width_percent: 5-15% of font size if stroke needed
 - Font: Choose based on image style and mood
@@ -165,7 +166,10 @@ Guidelines:
             # Calculate text width and adjust X position for centering
             text_width = estimate_text_width(text, placement_data['font_size'])
             placement_data['x'] = int((placement_data['x_percent'] / 100.0) * width - text_width / 2)
-            placement_data['y'] = int((placement_data['y_percent'] / 100.0) * height)
+            
+            # Adjust Y position to account for text baseline (add ~70% of font_size to center the text)
+            text_height_adjustment = int(placement_data['font_size'] * 0.3)  # Move down to center
+            placement_data['y'] = int((placement_data['y_percent'] / 100.0) * height + text_height_adjustment)
             
             # Store text width for display
             placement_data['text_width'] = text_width
@@ -192,7 +196,10 @@ Guidelines:
                 # Calculate text width and adjust X position for centering
                 alt_text_width = estimate_text_width(text, alt['font_size'])
                 alt['x'] = int((alt['x_percent'] / 100.0) * width - alt_text_width / 2)
-                alt['y'] = int((alt['y_percent'] / 100.0) * height)
+                
+                # Adjust Y position to account for text baseline
+                alt_text_height_adjustment = int(alt['font_size'] * 0.3)
+                alt['y'] = int((alt['y_percent'] / 100.0) * height + alt_text_height_adjustment)
                 
                 # Store text width for display
                 alt['text_width'] = alt_text_width
