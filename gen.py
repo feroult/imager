@@ -19,7 +19,7 @@ def improve_prompt(prompt):
 def generate_image(prompt, output_path):
     client = OpenAI()
     response = client.images.generate(
-        model="gpt-image-1",
+        model="gpt-image-2",
         prompt=prompt,
         size="1536x1024",
         quality="high",
@@ -33,13 +33,13 @@ def generate_image(prompt, output_path):
     print(f"Image successfully generated and saved at {output_path}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate an image from a text prompt using OpenAI's DALL-E model.")
+    parser = argparse.ArgumentParser(description="Generate an image from a text prompt using OpenAI's gpt-image-2 model.")
     parser.add_argument('-p', '--prompt', type=str, required=True, help='The text prompt to generate the image from')
     parser.add_argument('-o', '--output', type=str, required=True, help='The path to save the generated image')
     args = parser.parse_args()
 
-    #improved_prompt = improve_prompt(args.prompt)
-    improved_prompt = improve_prompt(args.prompt)
+    improved_prompt = args.prompt
+    # improved_prompt = improve_prompt(args.prompt)
     generate_image(improved_prompt, args.output)
 
 if __name__ == "__main__":

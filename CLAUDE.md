@@ -15,7 +15,7 @@ This is an image generation and manipulation toolkit with multiple AI-powered ba
 
 ### AI Service Integration
 The project integrates with multiple AI services:
-- **OpenAI**: Uses `gpt-image-1` model for generation and editing, `dall-e-2` for variations
+- **OpenAI**: Uses `gpt-image-2` model for generation, editing, and variations
 - **AWS Bedrock**: Uses `amazon.nova-canvas-v1:0` for generation and `amazon.nova-pro-v1:0` for multimodal tasks
 - **Flow-Coder**: Uses `flow-openai-gpt-4o` for prompt optimization
 

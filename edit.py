@@ -24,7 +24,7 @@ def edit_image(input_images, prompt, output_path):
 
     # Call the OpenAI API for image editing
     result = client.images.edit(
-        model="gpt-image-1",
+        model="gpt-image-2",
         image=image_files,
         # size="1536x1024",
         size="1024x1024",
@@ -44,7 +44,7 @@ def edit_image(input_images, prompt, output_path):
     print(f"Edited image successfully saved at {output_path}")
 
 def main():
-    parser = argparse.ArgumentParser(description="Edit an image based on a text prompt using OpenAI's image editing model.")
+    parser = argparse.ArgumentParser(description="Edit an image based on a text prompt using OpenAI's gpt-image-2 model.")
     parser.add_argument('-i', '--input', type=str, nargs='+', required=True, help='Paths to the input images (multiple allowed)')
     parser.add_argument('-p', '--prompt', type=str, required=True, help='The text prompt to edit the image')
     parser.add_argument('-o', '--output', type=str, required=True, help='The path to save the edited image')
