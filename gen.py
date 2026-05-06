@@ -21,7 +21,7 @@ def generate_image(prompt, output_path):
     response = client.images.generate(
         model="gpt-image-2",
         prompt=prompt,
-        size="1536x1024",
+        size="1536x864",
         quality="high",
         n=1,
     )

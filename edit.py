@@ -26,8 +26,7 @@ def edit_image(input_images, prompt, output_path):
     result = client.images.edit(
         model="gpt-image-2",
         image=image_files,
-        # size="1536x1024",
-        size="1024x1024",
+        size="1536x864",
         # quality="high",        
         quality="medium",
         prompt=prompt
